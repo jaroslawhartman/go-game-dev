@@ -30,10 +30,10 @@ import (
 const (
 	screenWidth  = 320
 	screenHeight = 240
-	boardWidth   = screenWidth / boxSize
-	boardHeight  = screenHeight / boxSize
+	boardWidth   = screenWidth/boxSize - 2
+	boardHeight  = screenHeight/boxSize - 2
 	boxSize      = 8
-	speed        = math.MaxUint8 / 10
+	speed        = math.MaxUint8 / 8
 )
 
 const (
@@ -52,9 +52,10 @@ type Game struct {
 	food      *Point
 	offscreen *ebiten.Image
 	direction *Point
-	color     uint8
+	color     float32
 	score     int
 	state     int
+	frame     uint32
 }
 
 var (
@@ -82,16 +83,16 @@ func init() {
 
 func (g *Game) handleKeyboard() {
 	switch {
-	case ebiten.IsKeyPressed(ebiten.KeyArrowUp):
+	case ebiten.IsKeyPressed(ebiten.KeyArrowUp) && g.direction.y != 1:
 		g.direction.x = 0
 		g.direction.y = -1
-	case ebiten.IsKeyPressed(ebiten.KeyArrowRight):
+	case ebiten.IsKeyPressed(ebiten.KeyArrowRight) && g.direction.x != -1:
 		g.direction.x = 1
 		g.direction.y = 0
-	case ebiten.IsKeyPressed(ebiten.KeyArrowDown):
+	case ebiten.IsKeyPressed(ebiten.KeyArrowDown) && g.direction.y != -1:
 		g.direction.x = 0
 		g.direction.y = 1
-	case ebiten.IsKeyPressed(ebiten.KeyArrowLeft):
+	case ebiten.IsKeyPressed(ebiten.KeyArrowLeft) && g.direction.x != 1:
 		g.direction.x = -1
 		g.direction.y = 0
 	}
@@ -99,6 +100,24 @@ func (g *Game) handleKeyboard() {
 
 func (p *Point) String() string {
 	return fmt.Sprintf("[%d,%d]", p.x, p.y)
+}
+
+func (g *Game) detectBorder(p *Point) {
+	if p.x+g.direction.x < 0 {
+		g.direction.x = 0
+		g.direction.y = -1
+	} else if p.x+g.direction.x > boardWidth {
+		g.direction.x = 0
+		g.direction.y = 1
+	}
+
+	if p.y+g.direction.y < 0 {
+		g.direction.x = 1
+		g.direction.y = 0
+	} else if p.y+g.direction.y > boardHeight {
+		g.direction.x = -1
+		g.direction.y = 0
+	}
 }
 
 func (g *Game) detectCollision(h *Point) bool {
@@ -132,6 +151,8 @@ func (g *Game) Update() error {
 			for i, v := range slices.Backward(g.snake) {
 				// head update
 				if i == 0 {
+					g.detectBorder(v)
+
 					v.x += g.direction.x
 					v.y += g.direction.y
 
@@ -164,9 +185,15 @@ func (g *Game) Update() error {
 				g.state = RUNNING
 			}
 		}
+
+		g.color -= math.MaxUint8
 	}
 
-	g.color += speed
+	if g.state == CRASHING {
+		g.color += speed * 3
+	} else {
+		g.color += speed
+	}
 	return nil
 }
 
@@ -182,18 +209,18 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 		if i == 0 {
 			// head update
-			c = color.Gray{g.color}
+			c = color.Gray{uint8(g.color)}
 		} else if i == len(g.snake)-1 && len(g.snake) > 1 {
 			// last tail section
-			c = color.Gray{math.MaxUint8 - g.color}
+			c = color.Gray{math.MaxUint8 - uint8(g.color)}
 		} else {
 			// middle sections
-			c = color.White
+			c = color.Gray{uint8(math.Sin(float64(i+int(g.frame/30)))*64 + 128)}
 		}
 
 		vector.DrawFilledRect(g.offscreen,
-			float32(v.x*boxSize),
-			float32(v.y*boxSize),
+			float32(5+v.x*boxSize),
+			float32(5+v.y*boxSize),
 			float32(boxSize-1),
 			float32(boxSize-1),
 			c,
@@ -202,8 +229,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 
 	// food
 	vector.DrawFilledRect(g.offscreen,
-		float32(g.food.x*boxSize),
-		float32(g.food.y*boxSize),
+		float32(5+g.food.x*boxSize),
+		float32(5+g.food.y*boxSize),
 		float32(boxSize-1),
 		float32(boxSize-1),
 		color.RGBA{255, 0, 0, 0},
@@ -220,6 +247,7 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	)
 
 	screen.DrawImage(g.offscreen, nil)
+	g.frame += 1
 }
 
 func (g *Game) Layout(outsideWidth, outsideHeight int) (int, int) {
@@ -240,6 +268,7 @@ func NewGame() ebiten.Game {
 		direction: &Point{1, 0},
 		food:      &Point{},
 		state:     RUNNING,
+		frame:     0,
 	}
 
 	g.setFood()
