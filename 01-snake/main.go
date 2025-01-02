@@ -42,25 +42,24 @@ type Game struct {
 	snake     []*Point
 	food      *Point
 	offscreen *ebiten.Image
-	dirX      int
-	dirY      int
+	direction *Point
 	color     uint8
 }
 
 func (g *Game) handleKeyboard() {
 	switch {
 	case ebiten.IsKeyPressed(ebiten.KeyArrowUp):
-		g.dirX = 0
-		g.dirY = -1
+		g.direction.x = 0
+		g.direction.y = -1
 	case ebiten.IsKeyPressed(ebiten.KeyArrowRight):
-		g.dirX = 1
-		g.dirY = 0
+		g.direction.x = 1
+		g.direction.y = 0
 	case ebiten.IsKeyPressed(ebiten.KeyArrowDown):
-		g.dirX = 0
-		g.dirY = 1
+		g.direction.x = 0
+		g.direction.y = 1
 	case ebiten.IsKeyPressed(ebiten.KeyArrowLeft):
-		g.dirX = -1
-		g.dirY = 0
+		g.direction.x = -1
+		g.direction.y = 0
 	}
 }
 
@@ -79,15 +78,19 @@ func (g *Game) Update() error {
 
 	// update color (= sync)
 	if uint16(g.color)+speed >= math.MaxUint8 {
-		// snake
+		// Snake
+		//
+		// Iterate backward (i.e. tail -> head) as the new segment
+		// position should be in the point where the predecesor (still) is
 		for i, v := range slices.Backward(g.snake) {
 			// head update
 			if i == 0 {
-				if uint16(g.color)+speed >= math.MaxUint8 {
-					v.x += g.dirX
-					v.y += g.dirY
-				}
+				v.x += g.direction.x
+				v.y += g.direction.y
 
+				// Grabbing the food? If so:
+				// - set a new peiece
+				// - append the new segment where the last tail was
 				if v.x == g.food.x && v.y == g.food.y {
 					g.setFood()
 					g.snake = append(g.snake, tail)
@@ -116,6 +119,8 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		// head update
 		if i == 0 {
 			c = color.Gray{g.color}
+		} else if i == len(g.snake)-1 && len(g.snake) > 1 {
+			c = color.Gray{math.MaxUint8 - g.color}
 		} else {
 			c = color.White
 		}
@@ -152,15 +157,15 @@ func (g *Game) setFood() {
 
 func NewGame() ebiten.Game {
 	snake := Point{boardHeight / 2, boardWidth / 2}
+	direction := Point{1, 0}
 
 	g := &Game{
 		offscreen: ebiten.NewImage(screenWidth, screenHeight),
 		snake: []*Point{
 			&snake,
 		},
-		dirX: 1,
-		dirY: 0,
-		food: &Point{},
+		direction: &direction,
+		food:      &Point{},
 	}
 
 	g.setFood()
