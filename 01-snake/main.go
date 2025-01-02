@@ -13,6 +13,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"image/color"
 	"log"
@@ -21,6 +22,8 @@ import (
 	"slices"
 
 	"github.com/hajimehoshi/ebiten/v2"
+	"github.com/hajimehoshi/ebiten/v2/examples/resources/fonts"
+	"github.com/hajimehoshi/ebiten/v2/text/v2"
 	"github.com/hajimehoshi/ebiten/v2/vector"
 )
 
@@ -31,6 +34,12 @@ const (
 	boardHeight  = screenHeight / boxSize
 	boxSize      = 8
 	speed        = math.MaxUint8 / 10
+)
+
+const (
+	RUNNING = iota
+	CRASHED
+	CRASHING
 )
 
 type Point struct {
@@ -44,6 +53,31 @@ type Game struct {
 	offscreen *ebiten.Image
 	direction *Point
 	color     uint8
+	score     int
+	state     int
+}
+
+var (
+	mplusFaceSource *text.GoTextFaceSource
+	mplusNormalFace *text.GoTextFace
+	mplusBigFace    *text.GoTextFace
+)
+
+func init() {
+	s, err := text.NewGoTextFaceSource(bytes.NewReader(fonts.MPlus1pRegular_ttf))
+	if err != nil {
+		log.Fatal(err)
+	}
+	mplusFaceSource = s
+
+	mplusNormalFace = &text.GoTextFace{
+		Source: mplusFaceSource,
+		Size:   24,
+	}
+	mplusBigFace = &text.GoTextFace{
+		Source: mplusFaceSource,
+		Size:   32,
+	}
 }
 
 func (g *Game) handleKeyboard() {
@@ -67,6 +101,17 @@ func (p *Point) String() string {
 	return fmt.Sprintf("[%d,%d]", p.x, p.y)
 }
 
+func (g *Game) detectCollision(h *Point) bool {
+	for i := 1; i < len(g.snake); i++ {
+		p := g.snake[i]
+		if p.x == h.x && p.y == h.y {
+			return true
+		}
+	}
+
+	return false
+}
+
 func (g *Game) Update() error {
 	g.handleKeyboard()
 
@@ -76,33 +121,52 @@ func (g *Game) Update() error {
 		g.snake[len(g.snake)-1].y,
 	}
 
-	// update color (= sync)
 	if uint16(g.color)+speed >= math.MaxUint8 {
-		// Snake
-		//
-		// Iterate backward (i.e. tail -> head) as the new segment
-		// position should be in the point where the predecesor (still) is
-		for i, v := range slices.Backward(g.snake) {
-			// head update
-			if i == 0 {
-				v.x += g.direction.x
-				v.y += g.direction.y
+		switch g.state {
+		case RUNNING:
+			// update color (= sync)
+			// Snake
+			//
+			// Iterate backward (i.e. tail -> head) as the new segment
+			// position should be in the point where the predecesor (still) is
+			for i, v := range slices.Backward(g.snake) {
+				// head update
+				if i == 0 {
+					v.x += g.direction.x
+					v.y += g.direction.y
 
-				// Grabbing the food? If so:
-				// - set a new peiece
-				// - append the new segment where the last tail was
-				if v.x == g.food.x && v.y == g.food.y {
-					g.setFood()
-					g.snake = append(g.snake, tail)
+					// Grabbing the food? If so:
+					// - set a new peiece
+					// - append the new segment where the last tail was
+					if v.x == g.food.x && v.y == g.food.y {
+						g.setFood()
+						g.snake = append(g.snake, tail)
+						g.score += 1
+					}
+				} else {
+					v.x = g.snake[i-1].x
+					v.y = g.snake[i-1].y
 				}
+			}
+
+			// check for collision and reinit if needed
+			if g.detectCollision(g.snake[0]) {
+				g.state = CRASHED
+			}
+		case CRASHED:
+			g.score = 0
+			g.state = CRASHING
+
+		case CRASHING:
+			if len(g.snake) > 1 {
+				g.snake = g.snake[0 : len(g.snake)-1]
 			} else {
-				v.x = g.snake[i-1].x
-				v.y = g.snake[i-1].y
+				g.state = RUNNING
 			}
 		}
 	}
-	g.color += speed
 
+	g.color += speed
 	return nil
 }
 
@@ -116,12 +180,14 @@ func (g *Game) Draw(screen *ebiten.Image) {
 	for i, v := range slices.Backward(g.snake) {
 		var c color.Color
 
-		// head update
 		if i == 0 {
+			// head update
 			c = color.Gray{g.color}
 		} else if i == len(g.snake)-1 && len(g.snake) > 1 {
+			// last tail section
 			c = color.Gray{math.MaxUint8 - g.color}
 		} else {
+			// middle sections
 			c = color.White
 		}
 
@@ -143,6 +209,16 @@ func (g *Game) Draw(screen *ebiten.Image) {
 		color.RGBA{255, 0, 0, 0},
 		true)
 
+	// score
+
+	op := &text.DrawOptions{}
+	op.GeoM.Translate(5, 3)
+
+	text.Draw(g.offscreen, fmt.Sprintf("Score: %d", g.score),
+		&text.GoTextFace{Source: mplusFaceSource, Size: 16},
+		op,
+	)
+
 	screen.DrawImage(g.offscreen, nil)
 }
 
@@ -156,16 +232,14 @@ func (g *Game) setFood() {
 }
 
 func NewGame() ebiten.Game {
-	snake := Point{boardHeight / 2, boardWidth / 2}
-	direction := Point{1, 0}
-
 	g := &Game{
 		offscreen: ebiten.NewImage(screenWidth, screenHeight),
 		snake: []*Point{
-			&snake,
+			{boardHeight / 2, boardWidth / 2},
 		},
-		direction: &direction,
+		direction: &Point{1, 0},
 		food:      &Point{},
+		state:     RUNNING,
 	}
 
 	g.setFood()
@@ -175,7 +249,7 @@ func NewGame() ebiten.Game {
 
 func main() {
 	ebiten.SetWindowSize(screenWidth*2, screenHeight*2)
-	ebiten.SetWindowTitle("Animation (Ebitengine Demo)")
+	ebiten.SetWindowTitle("Snake game")
 	if err := ebiten.RunGame(NewGame()); err != nil {
 		log.Fatal(err)
 	}
